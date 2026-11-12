@@ -3,64 +3,83 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Congratulation Control & Display System</title>
-  <!-- Tailwind CSS สำหรับจัดแต่งหน้าตา UI ให้สวยงามทันสมัย -->
+  <title>Congratulation System (Firebase Ready)</title>
+  <!-- โหลด Tailwind CSS จาก CDN เพื่อความรวดเร็วและสวยงาม -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Firebase SDK แบบ Modular ผ่าน CDN -->
+  <!-- Firebase SDK (Modular Version) -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, deleteDoc, doc, updateDoc, serverTimestamp, limit } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-    import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
+    import { 
+      getFirestore, collection, addDoc, onSnapshot, 
+      query, orderBy, deleteDoc, doc, updateDoc, serverTimestamp, limit 
+    } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { 
+      getStorage, ref, uploadBytes, getDownloadURL, deleteObject 
+    } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
 
-    // --- 1. ตั้งค่า Firebase (นำค่า Config ของคุณชินอิจิมาใส่ตรงนี้) ---
+    // ==========================================
+    // 1. ตั้งค่า Firebase (นำค่าของคุณชินอิจิมาใส่ตรงนี้)
+    // ==========================================
     const firebaseConfig = {
-      apiKey: "YOUR_API_KEY",
-      authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-      projectId: "YOUR_PROJECT_ID",
-      storageBucket: "YOUR_PROJECT_ID.appspot.com",
-      messagingSenderId: "YOUR_SENDER_ID",
-      appId: "YOUR_APP_ID"
+      apiKey: "AIzaSyDqolBzmp4njAnzFZ3FD8WWu2Hab2Y96as",
+      authDomain: "report-eb3b7.firebaseapp.com",
+      projectId: "report-eb3b7",
+      storageBucket: "report-eb3b7.firebasestorage.app",
+      messagingSenderId: "922628841408",
+      appId: "1:922628841408:web:448aa379668f577a233225"
     };
 
+    // เริ่มต้นระบบ Firebase
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
     const storage = getStorage(app);
+    const COLLECTION_NAME = "banners";
 
-    // ผูกฟังก์ชันไว้กับ window เพื่อให้ปุ่มใน HTML เรียกใช้งานได้
+    // ==========================================
+    // 2. ฟังก์ชันฝั่งหลังบ้าน (Admin Functions)
+    // ==========================================
     window.uploadImage = async function() {
       const fileInput = document.getElementById('imageInput');
       const uploadBtn = document.getElementById('uploadBtn');
       const statusText = document.getElementById('statusText');
 
-      if (!fileInput.files[0]) {
+      const file = fileInput.files[0];
+      if (!file) {
         alert('กรุณาเลือกรูปภาพก่อนอัปโหลดค่ะ');
         return;
       }
 
-      const file = fileInput.files[0];
+      // ตรวจสอบว่าเป็นไฟล์รูปภาพหรือไม่
+      if (!file.type.startsWith('image/')) {
+        alert('กรุณาเลือกไฟล์ประเภทรูปภาพเท่านั้นค่ะ');
+        return;
+      }
+
       uploadBtn.disabled = true;
       statusText.classList.remove('hidden');
 
       try {
-        const fileName = `congrats_${Date.now()}_${file.name}`;
-        const storageRef = ref(storage, `congratulations/${fileName}`);
-        
+        // สร้างชื่อไฟล์ไม่ให้ซ้ำกันด้วย Timestamp
+        const cleanFileName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
+        const storagePath = `congratulations/${Date.now()}_${cleanFileName}`;
+        const storageRef = ref(storage, storagePath);
+
         // อัปโหลดไฟล์ไปที่ Firebase Storage
         await uploadBytes(storageRef, file);
         const downloadURL = await getDownloadURL(storageRef);
 
-        // บันทึก URL และ Timestamp ลง Firestore
-        await addDoc(collection(db, "banners"), {
+        // บันทึกข้อมูลลง Cloud Firestore
+        await addDoc(collection(db, COLLECTION_NAME), {
           url: downloadURL,
-          storagePath: `congratulations/${fileName}`,
+          storagePath: storagePath,
           createdAt: serverTimestamp(),
-          updatedAt: Date.now()
+          updatedAt: Date.now() // ใช้ตัวเลขนี้ในการจัดลำดับรูปขึ้นจอ
         });
 
         fileInput.value = '';
-        alert('อัปโหลดและส่งขึ้นจอเรียบร้อยค่ะ!');
+        alert('อัปโหลดและส่งขึ้นระบบสำเร็จค่ะ!');
       } catch (error) {
-        console.error("Upload Error: ", error);
+        console.error("Upload Error:", error);
         alert('เกิดข้อผิดพลาดในการอัปโหลด: ' + error.message);
       } finally {
         uploadBtn.disabled = false;
@@ -68,28 +87,33 @@
       }
     };
 
-    // ดึงข้อมูลรายการรูปภาพมาแสดงในหลังบ้าน (Admin Panel) แบบ Real-time
-    const qAdmin = query(collection(db, "banners"), orderBy("updatedAt", "desc"));
+    // ดึงรายการรูปภาพทั้งหมดมาแสดงในหลังบ้านแบบ Real-time
+    const qAdmin = query(collection(db, COLLECTION_NAME), orderBy("updatedAt", "desc"));
     onSnapshot(qAdmin, (snapshot) => {
       const imageList = document.getElementById('imageList');
       imageList.innerHTML = '';
-      
+
+      if (snapshot.empty) {
+        imageList.innerHTML = `<p class="text-slate-500 col-span-full text-center py-8">ยังไม่มีรูปภาพในระบบ กรุณาอัปโหลดรูปภาพด้านบน</p>`;
+        return;
+      }
+
       snapshot.forEach((docSnap, index) => {
         const data = docSnap.data();
-        const isCurrent = index === 0;
+        const isCurrent = index === 0; // รูปบนสุดคือรูปที่กำลังแสดงผลบนจอ
 
         const card = document.createElement('div');
-        card.className = `bg-slate-800 rounded-xl overflow-hidden border-2 ${isCurrent ? 'border-emerald-500' : 'border-slate-700'}`;
+        card.className = `bg-slate-900 rounded-2xl overflow-hidden border-2 shadow-lg transition ${isCurrent ? 'border-amber-500 shadow-amber-500/10' : 'border-slate-800'}`;
         card.innerHTML = `
           <div class="relative aspect-video bg-black">
             <img src="${data.url}" class="w-full h-full object-cover">
-            ${isCurrent ? '<span class="absolute top-2 left-2 bg-emerald-500 text-slate-950 text-xs font-bold px-2.5 py-1 rounded">กำลังขึ้นจอ</span>' : ''}
+            ${isCurrent ? '<span class="absolute top-3 left-3 bg-amber-500 text-slate-950 text-xs font-bold px-3 py-1 rounded-full shadow">กำลังขึ้นจอหลัก</span>' : ''}
           </div>
-          <div class="p-3 flex justify-between gap-2">
-            <button onclick="window.showNow('${docSnap.id}')" class="flex-1 bg-slate-700 hover:bg-amber-500 hover:text-slate-900 text-sm py-1.5 rounded font-medium transition">
-              แสดงรูปนี้
+          <div class="p-4 flex items-center justify-between gap-3">
+            <button onclick="window.showNow('${docSnap.id}')" class="flex-1 bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-slate-200 text-sm py-2 rounded-xl font-medium transition">
+              ${isCurrent ? 'กำลังแสดงผล' : 'แสดงรูปนี้ทันที'}
             </button>
-            <button onclick="window.deleteBanner('${docSnap.id}', '${data.storagePath}')" class="bg-red-500/20 hover:bg-red-500 text-red-400 hover:text-white text-sm px-3 py-1.5 rounded transition">
+            <button onclick="window.deleteBanner('${docSnap.id}', '${data.storagePath}')" class="bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white text-sm px-4 py-2 rounded-xl transition">
               ลบ
             </button>
           </div>
@@ -98,8 +122,34 @@
       });
     });
 
-    // ดึงรูปภาพล่าสุดขึ้นจอแสดงผลหลัก (Display Screen 16:9) แบบ Real-time
-    const qDisplay = query(collection(db, "banners"), orderBy("updatedAt", "desc"), limit(1));
+    // สั่งเปลี่ยนรูปให้ขึ้นจอหลักทันที
+    window.showNow = async (id) => {
+      try {
+        await updateDoc(doc(db, COLLECTION_NAME, id), {
+          updatedAt: Date.now() // อัปเดต Timestamp ให้เป็นค่าล่าสุด เพื่อให้ query ดึงขึ้นมาเป็นอันดับ 1
+        });
+      } catch (err) {
+        console.error("Update Error:", err);
+      }
+    };
+
+    // ลบรูปภาพออกจากระบบและ Storage
+    window.deleteBanner = async (id, storagePath) => {
+      if (!confirm('ต้องการลบรูปภาพนี้ออกจากระบบใช่ไหมคะ?')) return;
+      try {
+        await deleteDoc(doc(db, COLLECTION_NAME, id));
+        if (storagePath) {
+          await deleteObject(ref(storage, storagePath));
+        }
+      } catch (err) {
+        console.error("Delete Error:", err);
+      }
+    };
+
+    // ==========================================
+    // 3. ฟังก์ชันฝั่งหน้าจอแสดงผล (Display Screen)
+    // ==========================================
+    const qDisplay = query(collection(db, COLLECTION_NAME), orderBy("updatedAt", "desc"), limit(1));
     onSnapshot(qDisplay, (snapshot) => {
       const displayImage = document.getElementById('displayImage');
       const emptyState = document.getElementById('emptyState');
@@ -110,48 +160,29 @@
         return;
       }
 
-      snapshot.forEach((doc) => {
-        const data = doc.data();
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
         displayImage.classList.add('opacity-0');
+        
         setTimeout(() => {
           displayImage.src = data.url;
           displayImage.onload = () => {
             emptyState.classList.add('hidden');
             displayImage.classList.remove('opacity-0');
           };
-        }, 400);
+        }, 300);
       });
     });
 
-    // ฟังก์ชันสั่งสลับรูปให้ขึ้นจอทันที
-    window.showNow = async (id) => {
-      await updateDoc(doc(db, "banners", id), {
-        updatedAt: Date.now()
-      });
-    };
-
-    // ฟังก์ชันลบรูปภาพ
-    window.deleteBanner = async (id, storagePath) => {
-      if (!confirm('ต้องการลบรูปภาพนี้ออกจากระบบใช่ไหมคะ?')) return;
-      try {
-        await deleteDoc(doc(db, "banners", id));
-        if (storagePath) {
-          await deleteObject(ref(storage, storagePath));
-        }
-      } catch (err) {
-        console.error("Delete Error: ", err);
-      }
-    };
-
-    // ฟังก์ชันเปิด/ปิดโหมดแสดงผลจอใหญ่เต็มตา
+    // สลับโหมดการแสดงผลระหว่าง Admin Panel และ หน้าจอแสดงผล 16:9
     window.toggleDisplayMode = (mode) => {
       const adminSection = document.getElementById('adminSection');
       const displaySection = document.getElementById('displaySection');
-      
+
       if (mode === 'display') {
         adminSection.classList.add('hidden');
         displaySection.classList.remove('hidden');
-        // ขอเข้าสู่โหมด Fullscreen อัตโนมัติเพื่อความสมบูรณ์
+        // ขอเข้าสู่โหมด Fullscreen อัตโนมัติ
         if (!document.fullscreenElement) {
           document.documentElement.requestFullscreen().catch(() => {});
         }
@@ -164,56 +195,58 @@
       }
     };
   </script>
+
   <style>
-    .fade-transition { transition: opacity 0.8s ease-in-out; }
+    .fade-transition { transition: opacity 0.6s ease-in-out; }
   </style>
 </head>
-<body class="bg-slate-950 text-white min-h-screen">
+<body class="bg-slate-950 text-slate-100 min-h-screen">
 
-  <!-- ================= ส่วนที่ 1: หน้าหลังบ้าน (Admin Panel & Controller) ================= -->
-  <div id="adminSection" class="max-w-5xl mx-auto p-6">
-    <div class="flex justify-between items-center mb-8 border-b border-slate-800 pb-4">
+  <!-- ================= ส่วนที่ 1: หน้าหลังบ้าน (Admin Panel) ================= -->
+  <div id="adminSection" class="max-w-6xl mx-auto p-6 md:p-10">
+    <!-- Header -->
+    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8 border-b border-slate-800 pb-6">
       <div>
-        <h1 class="text-2xl font-bold text-amber-400">Admin Control Panel</h1>
-        <p class="text-slate-400 text-sm">จัดการรูปภาพแสดงความยินดี (แนะนำสัดส่วน 16:9)</p>
+        <h1 class="text-3xl font-bold text-amber-400">Admin Panel : Congratulation System</h1>
+        <p class="text-slate-400 text-sm mt-1">ระบบจัดการและควบคุมภาพขึ้นจอแสดงผล (สัดส่วน 16:9)</p>
       </div>
-      <button onclick="window.toggleDisplayMode('display')" class="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg font-medium transition shadow-lg shadow-emerald-900/30">
-        🖥️ สลับไปหน้าจอแสดงผล (Display 16:9)
+      <button onclick="window.toggleDisplayMode('display')" class="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold px-5 py-3 rounded-2xl transition shadow-lg shadow-emerald-600/20 flex items-center gap-2">
+        🖥️ เปิดหน้าจอแสดงผล (Display 16:9)
       </button>
     </div>
 
-    <!-- ส่วนอัปโหลดรูป -->
-    <div class="bg-slate-900 p-6 rounded-2xl border border-slate-800 mb-8 shadow-xl">
-      <label class="block mb-2 font-semibold text-lg text-amber-300">อัปโหลดรูปภาพใหม่</label>
-      <div class="flex flex-col sm:flex-row gap-4">
+    <!-- Upload Card -->
+    <div class="bg-slate-900 p-6 md:p-8 rounded-3xl border border-slate-800 mb-10 shadow-2xl">
+      <h2 class="text-xl font-semibold mb-3 text-amber-300">อัปโหลดรูปภาพใหม่</h2>
+      <div class="flex flex-col sm:flex-row gap-4 items-center">
         <input type="file" id="imageInput" accept="image/*" 
-               class="block w-full text-sm text-slate-300 file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:font-semibold file:bg-amber-500 file:text-slate-950 hover:file:bg-amber-400 cursor-pointer bg-slate-950 rounded-xl border border-slate-800">
-        <button onclick="window.uploadImage()" id="uploadBtn" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-6 py-2.5 rounded-xl transition whitespace-nowrap disabled:opacity-50 shadow-lg shadow-amber-500/20">
+               class="block w-full text-sm text-slate-400 file:mr-4 file:py-3 file:px-6 file:rounded-xl file:border-0 file:font-semibold file:bg-amber-500 file:text-slate-950 hover:file:bg-amber-400 cursor-pointer bg-slate-950 rounded-2xl border border-slate-800">
+        <button onclick="window.uploadImage()" id="uploadBtn" class="w-full sm:w-auto bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-8 py-3.5 rounded-2xl transition whitespace-nowrap shadow-lg shadow-amber-500/20">
           อัปโหลดขึ้นระบบ
         </button>
       </div>
-      <p id="statusText" class="text-sm text-amber-400 mt-3 hidden animate-pulse">กำลังอัปโหลดไฟล์ขึ้นระบบ กรุณารอสักครู่...</p>
+      <p id="statusText" class="text-sm text-amber-400 mt-3 hidden animate-pulse font-medium">กำลังอัปโหลดรูปภาพขึ้น Firebase Storage...</p>
     </div>
 
-    <!-- รายการรูปภาพทั้งหมด -->
-    <h2 class="text-xl font-semibold mb-4 text-slate-200">รูปภาพทั้งหมดในระบบ</h2>
-    <div id="imageList" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-      <!-- ข้อมูลจะถูกเติมเข้ามาอัตโนมัติด้วย JavaScript -->
+    <!-- Image Grid List -->
+    <h2 class="text-2xl font-semibold mb-6 text-slate-200">รูปภาพทั้งหมดในระบบ</h2>
+    <div id="imageList" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+      <!-- รายการรูปภาพจะถูกโหลดมาแสดงตรงนี้อัตโนมัติ -->
     </div>
   </div>
 
-  <!-- ================= ส่วนที่ 2: หน้าจอแสดงผลเต็มจอ 16:9 (Display Screen) ================= -->
-  <div id="displaySection" class="hidden fixed inset-0 w-screen h-screen bg-black flex items-center justify-center">
-    <!-- ภาพแสดงผลแบบเต็มหน้าจอ -->
-    <img id="displayImage" src="" alt="Congratulation Display" class="w-full h-full object-contain aspect-video fade-transition opacity-0">
+  <!-- ================= ส่วนที่ 2: หน้าจอแสดงผล 16:9 เต็มจอ (Display Screen) ================= -->
+  <div id="displaySection" class="hidden fixed inset-0 w-screen h-screen bg-black flex items-center justify-center overflow-hidden">
+    <!-- ภาพแสดงผลหลัก -->
+    <img id="displayImage" src="" alt="Display Screen" class="w-full h-full object-contain aspect-video fade-transition opacity-0">
     
     <!-- ข้อความสำรองกรณีไม่มีรูป -->
     <div id="emptyState" class="absolute text-slate-600 text-2xl font-light tracking-widest uppercase">
       Waiting for congratulation image...
     </div>
 
-    <!-- ปุ่มกลับสู่หน้าผู้ดูแลระบบ -->
-    <button onclick="window.toggleDisplayMode('admin')" class="absolute bottom-5 right-5 bg-white/10 hover:bg-white/30 text-white backdrop-blur-md px-4 py-2 rounded-lg text-sm border border-white/10 transition shadow-lg">
+    <!-- ปุ่มกลับหน้า Admin (ซ่อนอยู่มุมขวาล่าง จะแสดงเมื่อนำเมาส์ไปชี้) -->
+    <button onclick="window.toggleDisplayMode('admin')" class="absolute bottom-6 right-6 bg-white/10 hover:bg-white/30 text-white backdrop-blur-md px-5 py-2.5 rounded-xl text-sm border border-white/10 transition shadow-xl opacity-20 hover:opacity-100">
       ⚙️ กลับหน้า Admin
     </button>
   </div>

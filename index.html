@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Congratulation Control & Display System</title>
+  <!-- Tailwind CSS สำหรับจัดแต่งหน้าตา UI ให้สวยงามทันสมัย -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Firebase SDK แบบ Modular ผ่าน CDN -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, deleteDoc, doc, updateDoc, serverTimestamp, limit } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
+
+    // --- 1. ตั้งค่า Firebase (นำค่า Config ของคุณชินอิจิมาใส่ตรงนี้) ---
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_PROJECT_ID.appspot.com",
+      messagingSenderId: "YOUR_SENDER_ID",
+      appId: "YOUR_APP_ID"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const storage = getStorage(app);
+
+    // ผูกฟังก์ชันไว้กับ window เพื่อให้ปุ่มใน HTML เรียกใช้งานได้
+    window.uploadImage = async function() {
+      const fileInput = document.getElementById('imageInput');
+      const uploadBtn = document.getElementById('uploadBtn');
+      const statusText = document.getElementById('statusText');
+
+      if (!fileInput.files[0]) {
+        alert('กรุณาเลือกรูปภาพก่อนอัปโหลดค่ะ');
+        return;
+      }
+
+      const file = fileInput.files[0];
+      uploadBtn.disabled = true;
+      statusText.classList.remove('hidden');
+
+      try {
+        const fileName = `congrats_${Date.now()}_${file.name}`;
+        const storageRef = ref(storage, `congratulations/${fileName}`);
+        
+        // อัปโหลดไฟล์ไปที่ Firebase Storage
+        await uploadBytes(storageRef, file);
+        const downloadURL = await getDownloadURL(storageRef);
+
+        // บันทึก URL และ Timestamp ลง Firestore
+        await addDoc(collection(db, "banners"), {
+          url: downloadURL,
+          storagePath: `congratulations/${fileName}`,
+          createdAt: serverTimestamp(),
+          updatedAt: Date.now()
+        });
+
+        fileInput.value = '';
+        alert('อัปโหลดและส่งขึ้นจอเรียบร้อยค่ะ!');
+      } catch (error) {
+        console.error("Upload Error: ", error);
+        alert('เกิดข้อผิดพลาดในการอัปโหลด: ' + error.message);
+      } finally {
+        uploadBtn.disabled = false;
+        statusText.classList.add('hidden');
+      }
+    };
+
+    // ดึงข้อมูลรายการรูปภาพมาแสดงในหลังบ้าน (Admin Panel) แบบ Real-time
+    const qAdmin = query(collection(db, "banners"), orderBy("updatedAt", "desc"));
+    onSnapshot(qAdmin, (snapshot) => {
+      const imageList = document.getElementById('imageList');
+      imageList.innerHTML = '';
+      
+      snapshot.forEach((docSnap, index) => {
+        const data = docSnap.data();
+        const isCurrent = index === 0;
+
+        const card = document.createElement('div');
+        card.className = `bg-slate-800 rounded-xl overflow-hidden border-2 ${isCurrent ? 'border-emerald-500' : 'border-slate-700'}`;
+        card.innerHTML = `
+          <div class="relative aspect-video bg-black">
+            <img src="${data.url}" class="w-full h-full object-cover">
+            ${isCurrent ? '<span class="absolute top-2 left-2 bg-emerald-500 text-slate-950 text-xs font-bold px-2.5 py-1 rounded">กำลังขึ้นจอ</span>' : ''}
+          </div>
+          <div class="p-3 flex justify-between gap-2">
+            <button onclick="window.showNow('${docSnap.id}')" class="flex-1 bg-slate-700 hover:bg-amber-500 hover:text-slate-900 text-sm py-1.5 rounded font-medium transition">
+              แสดงรูปนี้
+            </button>
+            <button onclick="window.deleteBanner('${docSnap.id}', '${data.storagePath}')" class="bg-red-500/20 hover:bg-red-500 text-red-400 hover:text-white text-sm px-3 py-1.5 rounded transition">
+              ลบ
+            </button>
+          </div>
+        `;
+        imageList.appendChild(card);
+      });
+    });
+
+    // ดึงรูปภาพล่าสุดขึ้นจอแสดงผลหลัก (Display Screen 16:9) แบบ Real-time
+    const qDisplay = query(collection(db, "banners"), orderBy("updatedAt", "desc"), limit(1));
+    onSnapshot(qDisplay, (snapshot) => {
+      const displayImage = document.getElementById('displayImage');
+      const emptyState = document.getElementById('emptyState');
+
+      if (snapshot.empty) {
+        displayImage.classList.add('opacity-0');
+        emptyState.classList.remove('hidden');
+        return;
+      }
+
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        displayImage.classList.add('opacity-0');
+        setTimeout(() => {
+          displayImage.src = data.url;
+          displayImage.onload = () => {
+            emptyState.classList.add('hidden');
+            displayImage.classList.remove('opacity-0');
+          };
+        }, 400);
+      });
+    });
+
+    // ฟังก์ชันสั่งสลับรูปให้ขึ้นจอทันที
+    window.showNow = async (id) => {
+      await updateDoc(doc(db, "banners", id), {
+        updatedAt: Date.now()
+      });
+    };
+
+    // ฟังก์ชันลบรูปภาพ
+    window.deleteBanner = async (id, storagePath) => {
+      if (!confirm('ต้องการลบรูปภาพนี้ออกจากระบบใช่ไหมคะ?')) return;
+      try {
+        await deleteDoc(doc(db, "banners", id));
+        if (storagePath) {
+          await deleteObject(ref(storage, storagePath));
+        }
+      } catch (err) {
+        console.error("Delete Error: ", err);
+      }
+    };
+
+    // ฟังก์ชันเปิด/ปิดโหมดแสดงผลจอใหญ่เต็มตา
+    window.toggleDisplayMode = (mode) => {
+      const adminSection = document.getElementById('adminSection');
+      const displaySection = document.getElementById('displaySection');
+      
+      if (mode === 'display') {
+        adminSection.classList.add('hidden');
+        displaySection.classList.remove('hidden');
+        // ขอเข้าสู่โหมด Fullscreen อัตโนมัติเพื่อความสมบูรณ์
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen().catch(() => {});
+        }
+      } else {
+        displaySection.classList.add('hidden');
+        adminSection.classList.remove('hidden');
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(() => {});
+        }
+      }
+    };
+  </script>
+  <style>
+    .fade-transition { transition: opacity 0.8s ease-in-out; }
+  </style>
+</head>
+<body class="bg-slate-950 text-white min-h-screen">
+
+  <!-- ================= ส่วนที่ 1: หน้าหลังบ้าน (Admin Panel & Controller) ================= -->
+  <div id="adminSection" class="max-w-5xl mx-auto p-6">
+    <div class="flex justify-between items-center mb-8 border-b border-slate-800 pb-4">
+      <div>
+        <h1 class="text-2xl font-bold text-amber-400">Admin Control Panel</h1>
+        <p class="text-slate-400 text-sm">จัดการรูปภาพแสดงความยินดี (แนะนำสัดส่วน 16:9)</p>
+      </div>
+      <button onclick="window.toggleDisplayMode('display')" class="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg font-medium transition shadow-lg shadow-emerald-900/30">
+        🖥️ สลับไปหน้าจอแสดงผล (Display 16:9)
+      </button>
+    </div>
+
+    <!-- ส่วนอัปโหลดรูป -->
+    <div class="bg-slate-900 p-6 rounded-2xl border border-slate-800 mb-8 shadow-xl">
+      <label class="block mb-2 font-semibold text-lg text-amber-300">อัปโหลดรูปภาพใหม่</label>
+      <div class="flex flex-col sm:flex-row gap-4">
+        <input type="file" id="imageInput" accept="image/*" 
+               class="block w-full text-sm text-slate-300 file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:font-semibold file:bg-amber-500 file:text-slate-950 hover:file:bg-amber-400 cursor-pointer bg-slate-950 rounded-xl border border-slate-800">
+        <button onclick="window.uploadImage()" id="uploadBtn" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-6 py-2.5 rounded-xl transition whitespace-nowrap disabled:opacity-50 shadow-lg shadow-amber-500/20">
+          อัปโหลดขึ้นระบบ
+        </button>
+      </div>
+      <p id="statusText" class="text-sm text-amber-400 mt-3 hidden animate-pulse">กำลังอัปโหลดไฟล์ขึ้นระบบ กรุณารอสักครู่...</p>
+    </div>
+
+    <!-- รายการรูปภาพทั้งหมด -->
+    <h2 class="text-xl font-semibold mb-4 text-slate-200">รูปภาพทั้งหมดในระบบ</h2>
+    <div id="imageList" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+      <!-- ข้อมูลจะถูกเติมเข้ามาอัตโนมัติด้วย JavaScript -->
+    </div>
+  </div>
+
+  <!-- ================= ส่วนที่ 2: หน้าจอแสดงผลเต็มจอ 16:9 (Display Screen) ================= -->
+  <div id="displaySection" class="hidden fixed inset-0 w-screen h-screen bg-black flex items-center justify-center">
+    <!-- ภาพแสดงผลแบบเต็มหน้าจอ -->
+    <img id="displayImage" src="" alt="Congratulation Display" class="w-full h-full object-contain aspect-video fade-transition opacity-0">
+    
+    <!-- ข้อความสำรองกรณีไม่มีรูป -->
+    <div id="emptyState" class="absolute text-slate-600 text-2xl font-light tracking-widest uppercase">
+      Waiting for congratulation image...
+    </div>
+
+    <!-- ปุ่มกลับสู่หน้าผู้ดูแลระบบ -->
+    <button onclick="window.toggleDisplayMode('admin')" class="absolute bottom-5 right-5 bg-white/10 hover:bg-white/30 text-white backdrop-blur-md px-4 py-2 rounded-lg text-sm border border-white/10 transition shadow-lg">
+      ⚙️ กลับหน้า Admin
+    </button>
+  </div>
+
+</body>
+</html>
